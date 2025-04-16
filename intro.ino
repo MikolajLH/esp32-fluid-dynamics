@@ -2,8 +2,9 @@
 #include <Adafruit_GFX.h>
 #include <Fonts/FreeSerif9pt7b.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 #include <Wire.h>
-#include "FastIMU.h"
 
 #define DISP_128X64 0
 #define DISP_64X32 1
@@ -79,82 +80,79 @@ void dump(void* mem, uint16_t len) {
   Serial.printf("\n");
 }
 
-//https://how2electronics.com/esp32-with-bmi160-accelerometer-gyroscope-sensor/
-/*
-const int sda_pin = 21;     // I2C SDA Pin for ESP32 (default GPIO 21)
-const int scl_pin = 22;     // I2C SCL Pin for ESP32 (default GPIO 22)
-#define IMU_ADDRESS 0x68
-BMI160 IMU;
-calData calib = { 0 };  //Calibration data
-AccelData accelData;    //Sensor data
-GyroData gyroData;
-MagData magData;
-*/
+Adafruit_MPU6050 mpu;
 
 void setup() {
   Serial.begin(115200);
   delay(5000);
   Serial.printf("\n\nstarting...\n");
-  /*
-  //Wire.begin(sda_pin, scl_pin);
-  //Wire.begin();
 
-  int err = IMU.init(calib, IMU_ADDRESS);
-  if (err != 0) {
-    Serial.printf("Error initializing IMU: ");
-    Serial.printf("%d\n", err);
-    while (true) {
-      ;
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
     }
   }
-  Serial.println("FastIMU calibration & data example");
-  if (IMU.hasMagnetometer()) {
-    delay(1000);
-    Serial.println("Move IMU in figure 8 pattern until done.");
-    delay(3000);
-    IMU.calibrateMag(&calib);
-    Serial.println("Magnetic calibration done!");
+  Serial.println("MPU6050 Found!");
+   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  Serial.print("Accelerometer range set to: ");
+  switch (mpu.getAccelerometerRange()) {
+  case MPU6050_RANGE_2_G:
+    Serial.println("+-2G");
+    break;
+  case MPU6050_RANGE_4_G:
+    Serial.println("+-4G");
+    break;
+  case MPU6050_RANGE_8_G:
+    Serial.println("+-8G");
+    break;
+  case MPU6050_RANGE_16_G:
+    Serial.println("+-16G");
+    break;
   }
-  else {
-    delay(5000);
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+  Serial.print("Gyro range set to: ");
+  switch (mpu.getGyroRange()) {
+  case MPU6050_RANGE_250_DEG:
+    Serial.println("+- 250 deg/s");
+    break;
+  case MPU6050_RANGE_500_DEG:
+    Serial.println("+- 500 deg/s");
+    break;
+  case MPU6050_RANGE_1000_DEG:
+    Serial.println("+- 1000 deg/s");
+    break;
+  case MPU6050_RANGE_2000_DEG:
+    Serial.println("+- 2000 deg/s");
+    break;
   }
 
-  delay(5000);
-  Serial.println("Keep IMU level.");
-  delay(5000);
-  IMU.calibrateAccelGyro(&calib);
-  Serial.println("Calibration done!");
-  Serial.println("Accel biases X/Y/Z: ");
-  Serial.print(calib.accelBias[0]);
-  Serial.print(", ");
-  Serial.print(calib.accelBias[1]);
-  Serial.print(", ");
-  Serial.println(calib.accelBias[2]);
-  Serial.println("Gyro biases X/Y/Z: ");
-  Serial.print(calib.gyroBias[0]);
-  Serial.print(", ");
-  Serial.print(calib.gyroBias[1]);
-  Serial.print(", ");
-  Serial.println(calib.gyroBias[2]);
-  if (IMU.hasMagnetometer()) {
-    Serial.println("Mag biases X/Y/Z: ");
-    Serial.print(calib.magBias[0]);
-    Serial.print(", ");
-    Serial.print(calib.magBias[1]);
-    Serial.print(", ");
-    Serial.println(calib.magBias[2]);
-    Serial.println("Mag Scale X/Y/Z: ");
-    Serial.print(calib.magScale[0]);
-    Serial.print(", ");
-    Serial.print(calib.magScale[1]);
-    Serial.print(", ");
-    Serial.println(calib.magScale[2]);
+  mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
+  Serial.print("Filter bandwidth set to: ");
+  switch (mpu.getFilterBandwidth()) {
+  case MPU6050_BAND_260_HZ:
+    Serial.println("260 Hz");
+    break;
+  case MPU6050_BAND_184_HZ:
+    Serial.println("184 Hz");
+    break;
+  case MPU6050_BAND_94_HZ:
+    Serial.println("94 Hz");
+    break;
+  case MPU6050_BAND_44_HZ:
+    Serial.println("44 Hz");
+    break;
+  case MPU6050_BAND_21_HZ:
+    Serial.println("21 Hz");
+    break;
+  case MPU6050_BAND_10_HZ:
+    Serial.println("10 Hz");
+    break;
+  case MPU6050_BAND_5_HZ:
+    Serial.println("5 Hz");
+    break;
   }
-  delay(5000);
-  IMU.init(calib, IMU_ADDRESS);
-  */
-
-  Serial.printf("starting...\n");
+ 
 
   HUB75_I2S_CFG::i2s_pins _pins = { R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN, A_PIN, B_PIN, C_PIN, D_PIN, E_PIN, LAT_PIN, OE_PIN, CLK_PIN };
   HUB75_I2S_CFG mxconfig(
@@ -168,41 +166,14 @@ void setup() {
   dma_display->setBrightness8(180);  //0-255
   dma_display->clearScreen();
 
-  //Serial.printf("splash screen...\n");
-  //show_splash_screen();
   Serial.printf("setup exit\n");
 }
 
 
 
 void update(float dt){
-
-  /*
-  IMU.update();
-  IMU.getAccel(&accelData);
-  Serial.print(accelData.accelX);
-  Serial.print("\t");
-  Serial.print(accelData.accelY);
-  Serial.print("\t");
-  Serial.print(accelData.accelZ);
-  Serial.print("\t");
-  IMU.getGyro(&gyroData);
-  Serial.print(gyroData.gyroX);
-  Serial.print("\t");
-  Serial.print(gyroData.gyroY);
-  Serial.print("\t");
-  Serial.print(gyroData.gyroZ);
-  Serial.println();
-  delay(50);
-  //*/
-
-  /*
-  IMU.update();
-  IMU.getGyro(&gyroData);
-  float gx = gyroData.gyroX;
-  float gy = gyroData.gyroY;
-  float gl = sqrtf(gx * gx + gy * gy);
-  //*/
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
 
   static float et = 0.f;
   static float timer = 0.f;
@@ -211,30 +182,71 @@ void update(float dt){
   
 
   // gravity
-  static const float g = 25.f;
+  static const float grav = 25.f;
 
   //ball position and radius
-  static float cx = 10.f;
-  static float cy = 15.f;
+  static float pos_x = 10.f;
+  static float pos_y = 15.f;
   static const int16_t r = 5;
 
   // ball's velocity
   static float vx = 0.f;
   static float vy = 0.f;
 
+  float acc_x = -a.acceleration.z;
+  float acc_y = a.acceleration.y;
+
+  const float acc_length = std::sqrtf(acc_x * acc_x + acc_y * acc_y);
+  acc_x /= acc_length;
+  acc_y /= acc_length;
+
   //motion equations
-  vx += g * dt;
-  cx += vx * dt;
-  cy += vy * dt;
+  vx += grav * acc_x * dt;
+  vy += grav * acc_y * dt;
+  pos_x += vx * dt;
+  pos_y += vy * dt;
   
-  //clapming
-  if(int16_t(cx) + r >= DISP_RES_X){
-    vx = -vx;
+  //bouncing
+  if(int16_t(pos_x) + r >= DISP_RES_X || int16_t(pos_x) - r < 0){
+    vx = -vx * 0.999f;
   }
+
+  if(int16_t(pos_y) + r >= DISP_RES_Y || int16_t(pos_y) - r < 0){
+    vy = -vy * 0.999f;
+  }
+  //
+
+  //clamping
+  pos_x = std::max(float(0 + r), pos_x);
+  pos_x = std::min(float(DISP_RES_X - r), pos_x);
+
+  pos_y = std::max(float(0 + r), pos_y);
+  pos_y = std::min(float(DISP_RES_Y - r), pos_y);
+  //
 
   //logging
   if(timer >= 1.f){
-    Serial.printf("dt - %f\np - (%f, %f)\nv - (%f, %f)\n\n", dt, cx, cy, vx, vy);
+    Serial.print("Acceleration X: ");
+    Serial.print(a.acceleration.x);
+    Serial.print(", Y: ");
+    Serial.print(a.acceleration.y);
+    Serial.print(", Z: ");
+    Serial.print(a.acceleration.z);
+    Serial.println(" m/s^2");
+
+    Serial.print("Rotation X: ");
+    Serial.print(g.gyro.x);
+    Serial.print(", Y: ");
+    Serial.print(g.gyro.y);
+    Serial.print(", Z: ");
+    Serial.print(g.gyro.z);
+    Serial.println(" rad/s");
+
+    Serial.print("Temperature: ");
+    Serial.print(temp.temperature);
+    Serial.println(" degC");
+    Serial.printf("dt - %f\np - (%f, %f)\nv - (%f, %f)\n\n", dt, pos_x, pos_y, vx, vy);
+    Serial.printf("a - (%f, %f)\n", acc_x, acc_y);
     timer = 0.f;
   }
 
@@ -244,7 +256,7 @@ void update(float dt){
   const uint16_t cr_color = disp_color(0, 0xff, 0);
   dma_display->fillScreen(bg_color);
   //dma_display->clearScreen();
-  dma_display->fillCircle(int16_t(cx), int16_t(cy), r, cr_color);
+  dma_display->fillCircle(int16_t(pos_x), int16_t(pos_y), r, cr_color);
   //*/
 
   /*
