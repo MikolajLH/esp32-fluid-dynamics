@@ -1,0 +1,6 @@
+---
+Diagnostics:
+  Suppress: [anon_bitfield_qualifiers]
+CompileFlags:
+  Add: [-ferror-limit=0, -xc++, -std=c++11, -fno-blocks]
+  Remove: [-xc]

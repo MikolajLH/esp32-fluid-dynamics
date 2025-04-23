@@ -1,0 +1,4 @@
+Adafruit GFX Library
+Adafruit MPU6050
+Adafruit Unified Sensor
+ESP32 HUB75 LED MATRIX PANEL DMA Display
