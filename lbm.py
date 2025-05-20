@@ -80,5 +80,5 @@ def update(frame):
     return [im]
 
 ani = animation.FuncAnimation(fig, update, frames=100, interval=1, blit=True)
-ani.save("animation.gif", writer="imagemagick", fps=15)
+#ani.save("animation.gif", writer="imagemagick", fps=15)
 plt.show()
