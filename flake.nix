@@ -18,7 +18,9 @@
 
         packages = with pkgs; [
           arduino-ide
+        ];
 
+        pypackages = with pkgs; [
           uv
           python313Full
         ];
@@ -38,12 +40,22 @@
         ld_path = "${pkgs.lib.makeLibraryPath libs}";
       in {
         devShells = {
-          default = envs.arduino.overrideAttrs (
+          python = envs.arduino.overrideAttrs (
             oldAttrs: {
-              buildInputs = oldAttrs.buildInputs ++ packages ++ libs;
+              buildInputs =
+                oldAttrs.buildInputs
+                ++ packages
+                ++ pypackages
+                ++ libs;
               shellHook = ''
                 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:${ld_path}"
               '';
+            }
+          );
+
+          default = envs.arduino.overrideAttrs (
+            oldAttrs: {
+              buildInputs = oldAttrs.buildInputs ++ packages;
             }
           );
         };
