@@ -2,4 +2,9 @@
 go
 
 *.swp
+*.swo
 build
+
+.dmypy*
+__pycache__/
+*mypy*
