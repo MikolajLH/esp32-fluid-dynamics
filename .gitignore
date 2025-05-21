@@ -8,3 +8,5 @@ build
 .dmypy*
 __pycache__/
 *mypy*
+.ropeproject
+*.local
