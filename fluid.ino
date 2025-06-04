@@ -106,13 +106,86 @@ void equilibrium0(
 }
 
 void fluid_setup() {
+  Serial.begin(115200);
+  delay(5000);
+  Serial.printf("\n\nstarting...\n");
+
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }
+  Serial.println("MPU6050 Found!");
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  Serial.print("Accelerometer range set to: ");
+  switch (mpu.getAccelerometerRange()) {
+  case MPU6050_RANGE_2_G:
+    Serial.println("+-2G");
+    break;
+  case MPU6050_RANGE_4_G:
+    Serial.println("+-4G");
+    break;
+  case MPU6050_RANGE_8_G:
+    Serial.println("+-8G");
+    break;
+  case MPU6050_RANGE_16_G:
+    Serial.println("+-16G");
+    break;
+  }
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+  Serial.print("Gyro range set to: ");
+  switch (mpu.getGyroRange()) {
+  case MPU6050_RANGE_250_DEG:
+    Serial.println("+- 250 deg/s");
+    break;
+  case MPU6050_RANGE_500_DEG:
+    Serial.println("+- 500 deg/s");
+    break;
+  case MPU6050_RANGE_1000_DEG:
+    Serial.println("+- 1000 deg/s");
+    break;
+  case MPU6050_RANGE_2000_DEG:
+    Serial.println("+- 2000 deg/s");
+    break;
+  }
+
+  HUB75_I2S_CFG::i2s_pins _pins = {
+      R1_PIN,
+      G1_PIN,
+      B1_PIN,
+      R2_PIN,
+      G2_PIN,
+      B2_PIN,
+      A_PIN,
+      B_PIN,
+      C_PIN,
+      D_PIN,
+      E_PIN,
+      LAT_PIN,
+      OE_PIN,
+      CLK_PIN
+  };
+  HUB75_I2S_CFG mxconfig(
+      DISP_RES_X, // module width
+      DISP_RES_Y, // module height
+      DISP_CHAIN, // chain length (how many modules are
+                  // connected in chain)
+      _pins       // pin mapping
+  );
+
+  dma_display = new MatrixPanel_I2S_DMA(mxconfig);
+  dma_display->begin();
+  dma_display->setBrightness8(180); // 0-255
+  dma_display->clearScreen();
+
   // Initialize with equilibrium
   for (int16_t i = 0; i < DIRS; i++) {
     equilibrium(f[i], i, rho, ux, uy, nullptr);
   }
 }
 
-void fluid_loop() {
+void fluid_update() {
   mpu.getEvent(&a, &g, &temp);
 
   // Collision
@@ -168,6 +241,12 @@ void fluid_loop() {
   for (int16_t i = 0; i < DIRS; i++) {
     // dx, dy = directions[i]
     const float dx = DIRECTIONS[i][0], dy = DIRECTIONS[i][1];
+
+    for (int16_t j = 0; j < DISP_RES_X; j++) {
+      for (int16_t k = 0; k < DISP_RES_Y; k++) {
+      }
+    }
+
     // TODO how the fuck
     // f[i] = np.roll(f[i], dx, axis=0)
     // f[i] = np.roll(f[i], dy, axis=1)
@@ -211,24 +290,45 @@ void fluid_loop() {
 
   for (int16_t j = 0; j < DISP_RES_X; j++) {
     for (int16_t k = 0; k < DISP_RES_Y; k++) {
+      ux[j][k] = 0;
+      uy[j][k] = 0;
+
+      // No idea if this is right
       for (int16_t i = 0; i < DIRS; i++) {
         // ux = np.sum(
         //   f * directions[:, 0].reshape(9, 1, 1),
         //   axis=0
         // ) / rho
+        ux[j][k] += f[i][j][k] * DIRECTIONS[i][0];
 
         // uy = np.sum(
         //   f * directions[:, 1].reshape(9, 1, 1),
         //   axis=0
         // ) / rho
-
-        //
+        uy[j][k] += f[i][j][k] * DIRECTIONS[i][1];
       }
 
-      ux[k][j] /= rho[k][j];
-      uy[k][j] /= rho[k][j];
+      ux[j][k] /= rho[j][k];
+      uy[j][k] /= rho[j][k];
     }
   }
+}
 
-  //
+void fluid_loop() {
+  for (int16_t i = 0; i < UPDATES; i++) {
+    fluid_update();
+  }
+  for (int16_t i = 0; i < DISP_RES_X; i++) {
+    for (int16_t j = 0; j < DISP_RES_Y; j++) {
+      // denst = np.sum(f, axis=0)
+      float density = 0;
+      for (int16_t k = 0; k < DIRS; k++) {
+        density += f[k][i][j];
+      }
+      // TODO how to properly calculate color
+      // im.set_array(denst.T)
+      dma_display->drawPixel(i, j, disp_color(density, density, density));
+    }
+  }
+  vTaskDelay(50);
 }
