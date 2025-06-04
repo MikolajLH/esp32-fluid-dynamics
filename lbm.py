@@ -48,9 +48,10 @@ for i in range(9):
 # --- Matplotlib Setup ---
 fig, ax = plt.subplots()
 im = ax.imshow(
-    #np.sqrt(ux**2 + uy**2).T,
+    # np.sqrt(ux**2 + uy**2).T,
     np.sum(f, axis=0).T,
-    cmap="plasma", origin="lower", 
+    cmap="plasma",
+    origin="lower",
 )
 plt.colorbar(im, ax=ax)
 ax.set_title("LBM Fluid Simulation (Velocity Magnitude)")
@@ -67,20 +68,19 @@ def lbm_step(s):
 
     rx, ry = 0, 0
     if s % 100 == 0:
-        rx = (np.random.rand() * 2 - 1) * 1.e-1
-        ry = (np.random.rand() * 2 - 1) * 1.e-1
-            
-    force_x = np.sin(2 * np.pi * s/(UPDATES * STEPS)) * -1e-2 + rx
-    force_y = -1e-2 + ry # gravity downward
+        rx = (np.random.rand() * 2 - 1) * 1.0e-1
+        ry = (np.random.rand() * 2 - 1) * 1.0e-1
+
+    force_x = np.sin(2 * np.pi * s / (UPDATES * STEPS)) * -1e-2 + rx
+    force_y = -1e-2 + ry  # gravity downward
 
     cs2 = 1.0 / 3.0
     for i in range(9):
         ei = directions[i]
-        eu = ei[0]*ux + ei[1]*uy
-        force_term = (
-            ((ei[0] - ux) + ei[0]*eu / cs2) * force_x +
-            ((ei[1] - uy) + ei[1]*eu / cs2) * force_y
-        )
+        eu = ei[0] * ux + ei[1] * uy
+        force_term = ((ei[0] - ux) + ei[0] * eu / cs2) * force_x + (
+            (ei[1] - uy) + ei[1] * eu / cs2
+        ) * force_y
 
         Fi = weights[i] * (1 - 0.5 * omega) * force_term / cs2 * rho
         f[i] += Fi
@@ -115,7 +115,7 @@ def update(frame):
         lbm_step(frame * UPDATES + i)
     speed = np.sqrt(ux**2 + uy**2)
     denst = np.sum(f, axis=0)
-    #im.set_array(speed.T)
+    # im.set_array(speed.T)
     im.set_array(denst.T)
     ax.set_title(f"Step {frame * UPDATES}")
     return [im]
@@ -124,5 +124,5 @@ def update(frame):
 ani = animation.FuncAnimation(
     fig, update, frames=STEPS, interval=1, blit=False
 )
-#ani.save("animation.gif", writer="imagemagick", fps=15)
+# ani.save("animation.gif", writer="imagemagick", fps=15)
 plt.show()
