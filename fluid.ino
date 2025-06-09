@@ -11,6 +11,8 @@ const int16_t UPDATES = 10;
 const int16_t STEPS = 100;
 const float GRAVITY = 2000;
 
+
+
 // --- D2Q9 Lattice ---
 const int16_t DIRECTIONS[DIRS][2] = {
     {0,  0 },
@@ -40,6 +42,7 @@ const float WEIGHTS[DIRS] = {
 const int16_t OPPOSITE[DIRS] = {0, 3, 4, 1, 2, 7, 8, 5, 6};
 
 // --- Initialization ---
+//float screenbuff[DISP_RES_X][DISP_RES_Y] = {0};
 
 float f[DIRS][DISP_RES_X][DISP_RES_Y] = {0};
 float rho[DISP_RES_X][DISP_RES_Y] = {0};
@@ -52,6 +55,23 @@ sensors_event_t a, g, temp;
 
 // --- Helpers ---
 
+void nans_in_f(const char* name) {
+  int counter = 0;
+  for (int16_t i = 0; i < DISP_RES_X; i++) {
+    for (int16_t j = 0; j < DISP_RES_Y; j++) {
+      for (int16_t k = 0; k < DIRS; k++) {
+        if (isnan(f[k][i][j]))counter++;
+      }
+      
+    }
+  }
+
+  Serial.println("NANS:");
+  Serial.println(name);
+  Serial.println(counter);
+  Serial.println("END NANS");
+}
+
 // f[i] = equilibrium(i, rho, ux, uy)
 // def equilibrium(i, rho, ux, uy):
 void equilibrium(
@@ -62,6 +82,7 @@ void equilibrium(
     float uy[DISP_RES_X][DISP_RES_Y],
     float sub[DISP_RES_X][DISP_RES_Y]
 ) {
+  nans_in_f("equalibrium");
   register double cu, usqr;
   for (int16_t j = 0; j < DISP_RES_X; j++) {
     for (int16_t k = 0; k < DISP_RES_Y; k++) {
@@ -95,6 +116,7 @@ void equilibrium0(
     float ux[DISP_RES_X][DISP_RES_Y],
     float uy[DISP_RES_X][DISP_RES_Y]
 ) {
+  nans_in_f("equilibirum0");
   register double cu, usqr;
   for (int16_t j = 0; j < DISP_RES_Y; j++) {
     cu = 3 * DIRECTIONS[i][0] * ux[0][j] +
@@ -183,11 +205,12 @@ void fluid_setup() {
   for (int16_t i = 0; i < DIRS; i++) {
     equilibrium(f[i], i, rho, ux, uy, nullptr);
   }
+  nans_in_f("After setup");
 }
 
 void fluid_update() {
   mpu.getEvent(&a, &g, &temp);
-
+  nans_in_f("fluid update begin");
   // Collision
   for (int16_t i = 0; i < DIRS; i++) {
     // feq = equilibrium(i, rho, ux, uy)
@@ -312,12 +335,62 @@ void fluid_update() {
       uy[j][k] /= rho[j][k];
     }
   }
+
+  nans_in_f("fluid update ended");
 }
 
 void fluid_loop() {
+  nans_in_f("fluid loop begin");
   for (int16_t i = 0; i < UPDATES; i++) {
     fluid_update();
   }
+
+  float max_d = f[0][0][0];
+  float min_d = f[0][0][0];
+
+  for (int16_t i = 0; i < DISP_RES_X; i++) {
+    for (int16_t j = 0; j < DISP_RES_Y; j++) {
+      // denst = np.sum(f, axis=0)
+      float density = 0;
+      for (int16_t k = 0; k < DIRS; k++) {
+        density += f[k][i][j];
+      }
+      if(density > max_d){ max_d = density; }
+      if(density < min_d){ min_d = density; }
+    }
+  }
+  float range = max_d - min_d;
+
+  Serial.println("LOG BEGIN");
+  Serial.println(max_d);
+  Serial.println(min_d);
+  Serial.println(range);
+
+  if(range == 0)range = 1;
+
+  for (int16_t i = 0; i < DISP_RES_X; i++) {
+    for (int16_t j = 0; j < DISP_RES_Y; j++) {
+
+      float density = 0;
+      for (int16_t k = 0; k < DIRS; k++) {
+        density += f[k][i][j];
+      }
+
+      //float grayf = (density - min_d) / range;
+      float grayf = density / max_d;
+      
+      uint8_t gray = (uint8_t)(grayf * 255);
+
+      if(i == 10 && j == 10){
+        Serial.println(grayf);
+        Serial.println(gray);
+        Serial.println("LOG END");
+        Serial.println("");
+      }
+      dma_display->drawPixel(i, j, disp_color(gray, gray, gray));
+    }
+  }
+  /*
   for (int16_t i = 0; i < DISP_RES_X; i++) {
     for (int16_t j = 0; j < DISP_RES_Y; j++) {
       // denst = np.sum(f, axis=0)
@@ -330,5 +403,7 @@ void fluid_loop() {
       dma_display->drawPixel(i, j, disp_color(density, density, density));
     }
   }
+  */
+  nans_in_f("fluid ended begin");
   vTaskDelay(50);
 }

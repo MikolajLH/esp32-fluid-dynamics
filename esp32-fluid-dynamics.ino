@@ -4,6 +4,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <Fonts/FreeSerif9pt7b.h>
 #include <Wire.h>
+#include <math.h>
 #include <freertos/FreeRTOS.h>
 
 #define DISP_128X64 0
@@ -87,11 +88,11 @@ void dump(void *mem, uint16_t len) {
 }
 
 void setup() {
-  // fluid_setup();
-  ball_setup();
+  fluid_setup();
+  //ball_setup();
 }
 
 void loop() {
-  // fluid_loop()
-  ball_loop();
+  fluid_loop();
+  //ball_loop();
 }
