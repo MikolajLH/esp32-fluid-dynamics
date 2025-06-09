@@ -1,5 +1,6 @@
-// Parameters
+#include <algorithm>
 
+// Parameters
 #define DIRS 9
 
 // Relaxation time
@@ -10,8 +11,6 @@ const float INFLOW_VELOCITY = 0.1;
 const int16_t UPDATES = 10;
 const int16_t STEPS = 100;
 const float GRAVITY = 2000;
-
-
 
 // --- D2Q9 Lattice ---
 const int16_t DIRECTIONS[DIRS][2] = {
@@ -42,7 +41,7 @@ const float WEIGHTS[DIRS] = {
 const int16_t OPPOSITE[DIRS] = {0, 3, 4, 1, 2, 7, 8, 5, 6};
 
 // --- Initialization ---
-//float screenbuff[DISP_RES_X][DISP_RES_Y] = {0};
+// float screenbuff[DISP_RES_X][DISP_RES_Y] = {0};
 
 float f[DIRS][DISP_RES_X][DISP_RES_Y] = {0};
 float rho[DISP_RES_X][DISP_RES_Y] = {0};
@@ -55,14 +54,14 @@ sensors_event_t a, g, temp;
 
 // --- Helpers ---
 
-void nans_in_f(const char* name) {
+void nans_in_f(const char *name) {
   int counter = 0;
   for (int16_t i = 0; i < DISP_RES_X; i++) {
     for (int16_t j = 0; j < DISP_RES_Y; j++) {
       for (int16_t k = 0; k < DIRS; k++) {
-        if (isnan(f[k][i][j]))counter++;
+        if (isnan(f[k][i][j]))
+          counter++;
       }
-      
     }
   }
 
@@ -70,6 +69,50 @@ void nans_in_f(const char* name) {
   Serial.println(name);
   Serial.println(counter);
   Serial.println("END NANS");
+}
+
+void roll(float arr[], int size, int shift) {
+  if (size <= 1 || shift == 0)
+    return;
+
+  // Normalize shift to be within array bounds
+  shift %= size;
+  if (shift < 0)
+    shift += size; // for negative shifts
+
+  // Reverse parts of the array and then the whole to rotate
+  std::reverse(arr, arr + size);
+  std::reverse(arr, arr + shift);
+  std::reverse(arr + shift, arr + size);
+}
+
+void reverse(
+    float f[DISP_RES_X][DISP_RES_Y], int start, int end
+) {
+  for (int16_t i = 0; i < DISP_RES_Y; i++) {
+    while (start < end) {
+      float temp = f[start][i];
+      f[start][i] = f[end][i];
+      f[end][i] = temp;
+      ++start;
+      --end;
+    }
+  }
+}
+
+void roll(float f[DISP_RES_X][DISP_RES_Y], int shift) {
+  if (shift == 0)
+    return;
+
+  // Normalize shift to be within array bounds
+  shift %= DISP_RES_X;
+  if (shift < 0)
+    shift += DISP_RES_X; // for negative shifts
+
+  // Reverse parts of the array and then the whole to rotate
+  reverse(f, 0, DISP_RES_X - 1);
+  reverse(f, 0, shift - 1);
+  reverse(f, shift, DISP_RES_X - 1);
 }
 
 // f[i] = equilibrium(i, rho, ux, uy)
@@ -264,15 +307,11 @@ void fluid_update() {
   for (int16_t i = 0; i < DIRS; i++) {
     // dx, dy = directions[i]
     const float dx = DIRECTIONS[i][0], dy = DIRECTIONS[i][1];
-
+    roll(f[i], dx);
     for (int16_t j = 0; j < DISP_RES_X; j++) {
-      for (int16_t k = 0; k < DISP_RES_Y; k++) {
-      }
+      roll(f[i][j], DISP_RES_Y, dy);
     }
 
-    // TODO how the fuck
-    // f[i] = np.roll(f[i], dx, axis=0)
-    // f[i] = np.roll(f[i], dy, axis=1)
   }
 
   // Bounce-back walls
@@ -355,8 +394,12 @@ void fluid_loop() {
       for (int16_t k = 0; k < DIRS; k++) {
         density += f[k][i][j];
       }
-      if(density > max_d){ max_d = density; }
-      if(density < min_d){ min_d = density; }
+      if (density > max_d) {
+        max_d = density;
+      }
+      if (density < min_d) {
+        min_d = density;
+      }
     }
   }
   float range = max_d - min_d;
@@ -366,7 +409,8 @@ void fluid_loop() {
   Serial.println(min_d);
   Serial.println(range);
 
-  if(range == 0)range = 1;
+  if (range == 0)
+    range = 1;
 
   for (int16_t i = 0; i < DISP_RES_X; i++) {
     for (int16_t j = 0; j < DISP_RES_Y; j++) {
@@ -376,18 +420,20 @@ void fluid_loop() {
         density += f[k][i][j];
       }
 
-      //float grayf = (density - min_d) / range;
+      // float grayf = (density - min_d) / range;
       float grayf = density / max_d;
-      
+
       uint8_t gray = (uint8_t)(grayf * 255);
 
-      if(i == 10 && j == 10){
+      if (i == 10 && j == 10) {
         Serial.println(grayf);
         Serial.println(gray);
         Serial.println("LOG END");
         Serial.println("");
       }
-      dma_display->drawPixel(i, j, disp_color(gray, gray, gray));
+      dma_display->drawPixel(
+          i, j, disp_color(gray, gray, gray)
+      );
     }
   }
   /*
@@ -400,7 +446,8 @@ void fluid_loop() {
       }
       // TODO how to properly calculate color
       // im.set_array(denst.T)
-      dma_display->drawPixel(i, j, disp_color(density, density, density));
+      dma_display->drawPixel(i, j, disp_color(density, density,
+  density));
     }
   }
   */
