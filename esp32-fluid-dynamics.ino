@@ -154,7 +154,7 @@ void setup_dma(){
 
 
 
-
+#define SOLVER_ITERATIONS 20
 #define NX DISP_RES_X
 #define NY DISP_RES_Y
 #define SIZE ((NX + 2) * (NY + 2))
@@ -170,8 +170,9 @@ static float dens[SIZE];
 static float dens_prev[SIZE]; 
 
 
-const float diff = 0.00001f;
-const float visc = 0.00001f;
+const float diff = 0.0f;    
+const float visc = 0.0f;
+const float grav_strength = 3.8f;
 
 
 void add_source(float* x, float* s, float dt)
@@ -182,6 +183,9 @@ void add_source(float* x, float* s, float dt)
 
 void diffuse(int b, float* x, float* x0, float diff, float dt)
 {
+  //
+  for(int i = 0; i < SIZE; ++i) x[i] = 0.f;
+
 	const float a = dt * diff * NX * NY;
   const float z = 1 / (1.f + 4.f*a);
 	for (int k=0; k < 20; ++k) {
@@ -196,12 +200,12 @@ void diffuse(int b, float* x, float* x0, float diff, float dt)
 
 void advect(int b, float* d, float* d0, float* u, float* v, float dt)
 {
-	//const float dt0 = dt * 45.254833995939045f;
   const float dtx = dt * NX;
   const float dty = dt * NY;
 
 	for (int i = 1; i <= NX; i++) {
 	  for (int j = 1; j <= NY; j++) {
+
 			float x = i - dtx * u[IX(i, j)];
 			if (x < 0.5f) x = 0.5f;
       if (x > NX + 0.5f) x = NX + 0.5f;
@@ -222,14 +226,16 @@ void advect(int b, float* d, float* d0, float* u, float* v, float dt)
 			d[IX(i, j)] = s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) + s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
 		}
 	}
-	set_bnd (b, d);
+	set_bnd(b, d);
 }
 
 void dens_step(float* x, float* x0, float* u, float* v, float diff, float dt)
 {
 	add_source (x, x0, dt);
+
   std::swap(x0, x);
-	diffuse (0, x, x0, diff, dt);
+	diffuse(0, x, x0, diff, dt);
+
   std::swap(x0, x);
 	advect(0, x, x0, u, v, dt);
 }
@@ -240,38 +246,38 @@ void vel_step(float* u, float* v, float* u0, float* v0, float visc, float dt)
   add_source(v, v0, dt);
 
   std::swap(u0, u);
-  diffuse(1, u, u0, visc, dt );
-	 
   std::swap(v0, v);
+
+  diffuse(1, u, u0, visc, dt );
 	diffuse(2, v, v0, visc, dt);
+
 	project(u, v, u0, v0);
+
 
   std::swap(u0, u);
   std::swap(v0, v);
 	
 	advect(1, u, u0, u0, v0, dt);
   advect(2, v, v0, u0, v0, dt);
+
 	project(u, v, u0, v0);
 }
 
 void project(float* u, float* v, float* p, float* div)
 {
-	//const float h = 1.0f / N;
-  const float h = 0.022097086912079608f; //1.0f / sqrt(NX * NY)
 	for (int i=1; i <= NX; ++i) {
 		for (int j=1; j <= NY; ++j) {
-			div[IX(i, j)] = -0.5f * h * (u[IX(i + 1, j)] - u[IX(i - 1, j)] + v[IX(i, j + 1)] - v[IX(i, j - 1)]);
-      p[IX(i, j)] = 0;
+			div[IX(i, j)] = -0.5f * (u[IX(i + 1, j)] - u[IX(i - 1, j)] + v[IX(i, j + 1)] - v[IX(i, j - 1)]);
+      p[IX(i, j)] = 0.f;
 		}
 	}
-
 	set_bnd (0, div);
   set_bnd (0, p);
 
-	for (int k=0 ; k<20; k++) {
+	for (int k=0 ; k < SOLVER_ITERATIONS; k++) {
 		for (int i=1; i <= NX; i++) {
 			for (int j=1; j <= NY; j++) {
-				p[IX(i, j)] = (div[IX(i, j)] + p[IX(i - 1, j)] + p[IX(i + 1, j)] + p[IX(i, j - 1)] + p[IX(i, j + 1)]) * 0.25f;
+				p[IX(i, j)] = (div[IX(i, j)] + p[IX(i - 1, j)] + p[IX(i + 1, j)] + p[IX(i, j - 1)] + p[IX(i, j + 1)]) / 4.f;
 			}
 		}
 		set_bnd (0, p);
@@ -279,8 +285,8 @@ void project(float* u, float* v, float* p, float* div)
 
 	for (int i=1 ; i <= NX; i++) {
 		for (int j=1 ; j <= NY; j++) {
-			u[IX(i,j)] -= 0.5 * (p[IX(i + 1, j)] - p[IX(i - 1, j)]) / h;
-			v[IX(i,j)] -= 0.5 * (p[IX(i, j + 1)] - p[IX(i, j - 1)]) / h;
+			u[IX(i, j)] -= 0.5 * (p[IX(i + 1, j)] - p[IX(i - 1, j)]);
+			v[IX(i, j)] -= 0.5 * (p[IX(i, j + 1)] - p[IX(i, j - 1)]);
 		}
 	}
 
@@ -290,21 +296,50 @@ void project(float* u, float* v, float* p, float* div)
 
 void set_bnd(int b, float* x)
 {
-	for (int i = 1; i <= NX ; ++i) {
-		x[IX(i, 0 )]     = b == 2 ? -x[IX(i, 1)]  : x[IX(i, 1)];
-		x[IX(i, NY + 1)] = b == 2 ? -x[IX(i, NY)] : x[IX(i, NY)];
-	}
+  // x-axis
+  if(b == 1) {
+    for (int i = 1; i <= NX; i++) {
+    x[IX(i, 0)] = -x[IX(i, 1)];
+    x[IX(i, NY + 1)] = -x[IX(i, NY)];
+    }
 
-  for (int i = 1; i <= NY ; ++i) {
-    x[IX(0 , i)]     = b == 1 ? -x[IX(1, i)]  : x[IX(1, i)];
-		x[IX(NX + 1, i)] = b == 1 ? -x[IX(NX, i)] : x[IX(NX, i)];
-	}
+    for (int j = 1; j <= NY; j++) {
+      x[IX(0, j)] = x[IX(1, j)];
+      x[IX(NX + 1, j)] = x[IX(NX, j)];
+    }
+  }
+  
+  if(b == 2) {
+    for (int i = 1; i <= NX; i++) {
+      x[IX(i, 0)] = x[IX(i, 1)];
+      x[IX(i, NY + 1)] = x[IX(i, NY)];
+    }
 
+    for (int j = 1; j <= NY; j++) {
+      x[IX(0, j)] = -x[IX(1, j)];
+      x[IX(NX + 1, j)] = -x[IX(NX, j)];
+    }
+  }
 
-	x[IX(0 , 0)]        = 0.5f * (x[IX(1, 0)]       + x[IX(0, 1)]);
-	x[IX(0 , NY+1)]     = 0.5f * (x[IX(1, NY + 1)]  + x[IX(0, NY)]);
-	x[IX(NX + 1, 0)]    = 0.5f * (x[IX(NX, 0)]      + x[IX(NX + 1, 1)]);
-	x[IX(NX + 1, NY+1)] = 0.5f * (x[IX(NX, NY + 1)] + x[IX(NX + 1, NY)]);
+  // density
+  if(b == 0) {
+    for (int i = 1; i <= NX; i++) {
+      x[IX(i, 0)] = x[IX(i, 1)];
+      x[IX(i, NY + 1)] = x[IX(i, NY)];
+    }
+
+    for (int j = 1; j <= NY; j++) {
+      x[IX(0, j)] = x[IX(1, j)];
+      x[IX(NX + 1, j)] = x[IX(NX, j)];
+    }
+  }
+
+  // corners
+  x[IX(0, 0)]         = 0.5f * (x[IX(1, 0)] + x[IX(0, 1)]);
+  x[IX(0, NY + 1)]   = 0.5f * (x[IX(1, NY + 1)] + x[IX(0, NY)]);
+  x[IX(NX + 1, 0)]   = 0.5f * (x[IX(NX, 0)] + x[IX(NX + 1, 1)]);
+  x[IX(NX + 1, NY + 1)] = 0.5f * (x[IX(NX, NY + 1)] + x[IX(NX + 1, NY)]);
+
 }
 
 void setup() {
@@ -319,11 +354,11 @@ void setup() {
   setup_mpu();
   Serial.printf("ok...\n");
 
-   for (int i = 28; i <= 36; ++i) {
-			for (int j = 12 ; j <= 20; ++j) {
-        dens[IX(i, j)] = 100.f;
-			}
-		}
+   for (int j = 12; j <= 20; j++) {
+      for (int i = 28; i <= 40; i++) {
+          dens[IX(i,j)] = 100.0f;
+      }
+  }
 
     Serial.printf("setup finished\n");
 }
@@ -331,10 +366,12 @@ void setup() {
 void draw_dens(){
   const float max_expected_density = 100.f;
   float md = dens[IX(1, 1)];
+  float sm = 0.f;
   for (int i = 1; i <= NX; ++i) {
 			for (int j = 1 ; j <= NY; ++j) {
         float raw_density = dens[IX(i, j)];
         if(raw_density > md)md = raw_density;
+        sm += raw_density;
 
         float norm_density = raw_density / max_expected_density;
         if (norm_density > 1.0f) norm_density = 1.0f;
@@ -345,8 +382,11 @@ void draw_dens(){
         dma_display->drawPixel(i - 1, j - 1, disp_color(gray, gray, gray));
 			}
 		}
-  
+
+  float avg = sm / (64.f * 32.f);
+  Serial.println(avg);
   Serial.println(md);
+  Serial.println("----------");
 }
 
 
@@ -358,18 +398,20 @@ void loop() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  static const float grav = 0.1f;
+  //static const float grav = 0.1f;
 
   float acc_x = -a.acceleration.z;
   float acc_y = a.acceleration.y;
-
   const float acc_length = std::sqrtf(acc_x * acc_x + acc_y * acc_y);
   acc_x /= acc_length;
   acc_y /= acc_length;
 
+  //acc_x = 0.0f;
+  //acc_y = 1.0f;
+
   for (int i=0 ; i < SIZE; ++i){
-    u_prev[i] = grav * acc_x;
-    v_prev[i] = grav * acc_y;
+    u_prev[i] = grav_strength * acc_x;
+    v_prev[i] = grav_strength * acc_y;
     dens_prev[i] = 0.f;
   }
 
