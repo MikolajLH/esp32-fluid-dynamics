@@ -148,7 +148,7 @@ void setup_dma(){
   );
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(180); // 0-255
+  dma_display->setBrightness8(230); // 0-255
   dma_display->clearScreen();
 }
 
@@ -170,9 +170,9 @@ static float dens[SIZE];
 static float dens_prev[SIZE]; 
 
 
-const float diff = 0.0f;    
-const float visc = 0.0f;
-const float grav_strength = 3.8f;
+const float diff = 0.0f;
+const float visc = 0.01f;
+const float grav_strength = 1.f;
 
 
 void add_source(float* x, float* s, float dt)
