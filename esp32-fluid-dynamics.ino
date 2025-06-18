@@ -6,6 +6,7 @@
 #include <Wire.h>
 #include <math.h>
 #include <freertos/FreeRTOS.h>
+#include "Simulation.h"
 
 #define DISP_128X64 0
 #define DISP_64X32  1
@@ -47,6 +48,7 @@ enum HubPins {
 
 MatrixPanel_I2S_DMA *dma_display = nullptr;
 Adafruit_MPU6050 mpu;
+Simulation sim{};
 
 // Convert RGB888 to RGB565 which is used by the library
 // It gets converted anyway inside the libs,
@@ -148,204 +150,278 @@ void setup_dma(){
   );
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(230); // 0-255
+  dma_display->setBrightness8(255); // 0-255
   dma_display->clearScreen();
 }
-
-
-
-#define SOLVER_ITERATIONS 20
-#define NX DISP_RES_X
-#define NY DISP_RES_Y
-#define SIZE ((NX + 2) * (NY + 2))
-#define IX(i, j) ((i) + (NX + 2) * (j))
-
-// (u,v)
-static float u[SIZE];
-static float v[SIZE];
-static float u_prev[SIZE];
-static float v_prev[SIZE];
-
-static float dens[SIZE];
-static float dens_prev[SIZE]; 
-
-
-const float diff = 0.0f;
-const float visc = 0.01f;
-const float grav_strength = 1.f;
-
-
-void add_source(float* x, float* s, float dt)
-{
-	for (int i=0 ; i < SIZE; ++i)
-    x[i] += dt * s[i];
-}
-
-void diffuse(int b, float* x, float* x0, float diff, float dt)
-{
-  //
-  for(int i = 0; i < SIZE; ++i) x[i] = 0.f;
-
-	const float a = dt * diff * NX * NY;
-  const float z = 1 / (1.f + 4.f*a);
-	for (int k=0; k < 20; ++k) {
-		for (int i=1; i <= NX; ++i) {
-			for (int j=1 ; j <= NY; ++j) {
-				x[IX(i, j)] = (x0[IX(i, j)] + a * (x[IX(i - 1, j)] + x[IX(i + 1, j)] + x[IX(i, j - 1)] + x[IX(i, j + 1)])) * z;
-			}
-		}
-		set_bnd(b, x);
-	}
-}
-
-void advect(int b, float* d, float* d0, float* u, float* v, float dt)
-{
-  const float dtx = dt * NX;
-  const float dty = dt * NY;
-
-	for (int i = 1; i <= NX; i++) {
-	  for (int j = 1; j <= NY; j++) {
-
-			float x = i - dtx * u[IX(i, j)];
-			if (x < 0.5f) x = 0.5f;
-      if (x > NX + 0.5f) x = NX + 0.5f;
-      int i0 = (int)x;
-      int i1 = i0 + 1;
-
-      float y = j - dty * v[IX(i, j)];
-			if (y < 0.5f) y = 0.5f;
-      if (y > NY + 0.5f) y = NY + 0.5;
-      int j0 = (int)y;
-      int j1 = j0 + 1;
-
-			float s1 = x - i0;
-      float s0 = 1 - s1;
-      float t1 = y - j0;
-      float t0 = 1 - t1;
-
-			d[IX(i, j)] = s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) + s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
-		}
-	}
-	set_bnd(b, d);
-}
-
-void dens_step(float* x, float* x0, float* u, float* v, float diff, float dt)
-{
-	add_source (x, x0, dt);
-
-  std::swap(x0, x);
-	diffuse(0, x, x0, diff, dt);
-
-  std::swap(x0, x);
-	advect(0, x, x0, u, v, dt);
-}
-
-void vel_step(float* u, float* v, float* u0, float* v0, float visc, float dt)
-{
-	add_source(u, u0, dt);
-  add_source(v, v0, dt);
-
-  std::swap(u0, u);
-  std::swap(v0, v);
-
-  diffuse(1, u, u0, visc, dt );
-	diffuse(2, v, v0, visc, dt);
-
-	project(u, v, u0, v0);
-
-
-  std::swap(u0, u);
-  std::swap(v0, v);
-	
-	advect(1, u, u0, u0, v0, dt);
-  advect(2, v, v0, u0, v0, dt);
-
-	project(u, v, u0, v0);
-}
-
-void project(float* u, float* v, float* p, float* div)
-{
-	for (int i=1; i <= NX; ++i) {
-		for (int j=1; j <= NY; ++j) {
-			div[IX(i, j)] = -0.5f * (u[IX(i + 1, j)] - u[IX(i - 1, j)] + v[IX(i, j + 1)] - v[IX(i, j - 1)]);
-      p[IX(i, j)] = 0.f;
-		}
-	}
-	set_bnd (0, div);
-  set_bnd (0, p);
-
-	for (int k=0 ; k < SOLVER_ITERATIONS; k++) {
-		for (int i=1; i <= NX; i++) {
-			for (int j=1; j <= NY; j++) {
-				p[IX(i, j)] = (div[IX(i, j)] + p[IX(i - 1, j)] + p[IX(i + 1, j)] + p[IX(i, j - 1)] + p[IX(i, j + 1)]) / 4.f;
-			}
-		}
-		set_bnd (0, p);
-	}
-
-	for (int i=1 ; i <= NX; i++) {
-		for (int j=1 ; j <= NY; j++) {
-			u[IX(i, j)] -= 0.5 * (p[IX(i + 1, j)] - p[IX(i - 1, j)]);
-			v[IX(i, j)] -= 0.5 * (p[IX(i, j + 1)] - p[IX(i, j - 1)]);
-		}
-	}
-
-	set_bnd(1, u);
-  set_bnd(2, v);
-}
-
-void set_bnd(int b, float* x)
-{
-  // x-axis
-  if(b == 1) {
-    for (int i = 1; i <= NX; i++) {
-    x[IX(i, 0)] = -x[IX(i, 1)];
-    x[IX(i, NY + 1)] = -x[IX(i, NY)];
-    }
-
-    for (int j = 1; j <= NY; j++) {
-      x[IX(0, j)] = x[IX(1, j)];
-      x[IX(NX + 1, j)] = x[IX(NX, j)];
-    }
-  }
-  
-  if(b == 2) {
-    for (int i = 1; i <= NX; i++) {
-      x[IX(i, 0)] = x[IX(i, 1)];
-      x[IX(i, NY + 1)] = x[IX(i, NY)];
-    }
-
-    for (int j = 1; j <= NY; j++) {
-      x[IX(0, j)] = -x[IX(1, j)];
-      x[IX(NX + 1, j)] = -x[IX(NX, j)];
-    }
-  }
-
-  // density
-  if(b == 0) {
-    for (int i = 1; i <= NX; i++) {
-      x[IX(i, 0)] = x[IX(i, 1)];
-      x[IX(i, NY + 1)] = x[IX(i, NY)];
-    }
-
-    for (int j = 1; j <= NY; j++) {
-      x[IX(0, j)] = x[IX(1, j)];
-      x[IX(NX + 1, j)] = x[IX(NX, j)];
-    }
-  }
-
-  // corners
-  x[IX(0, 0)]         = 0.5f * (x[IX(1, 0)] + x[IX(0, 1)]);
-  x[IX(0, NY + 1)]   = 0.5f * (x[IX(1, NY + 1)] + x[IX(0, NY)]);
-  x[IX(NX + 1, 0)]   = 0.5f * (x[IX(NX, 0)] + x[IX(NX + 1, 1)]);
-  x[IX(NX + 1, NY + 1)] = 0.5f * (x[IX(NX, NY + 1)] + x[IX(NX + 1, NY)]);
-
-}
+const uint8_t viridis_colormap[256][3] = {
+    {68, 1, 84},
+    {68, 2, 85},
+    {68, 3, 87},
+    {69, 5, 88},
+    {69, 6, 90},
+    {69, 8, 91},
+    {70, 9, 92},
+    {70, 11, 94},
+    {70, 12, 95},
+    {70, 14, 97},
+    {71, 15, 98},
+    {71, 17, 99},
+    {71, 18, 101},
+    {71, 20, 102},
+    {71, 21, 103},
+    {71, 22, 105},
+    {71, 24, 106},
+    {72, 25, 107},
+    {72, 26, 108},
+    {72, 28, 110},
+    {72, 29, 111},
+    {72, 30, 112},
+    {72, 32, 113},
+    {72, 33, 114},
+    {72, 34, 115},
+    {72, 35, 116},
+    {71, 37, 117},
+    {71, 38, 118},
+    {71, 39, 119},
+    {71, 40, 120},
+    {71, 42, 121},
+    {71, 43, 122},
+    {71, 44, 123},
+    {70, 45, 124},
+    {70, 47, 124},
+    {70, 48, 125},
+    {70, 49, 126},
+    {69, 50, 127},
+    {69, 52, 127},
+    {69, 53, 128},
+    {69, 54, 129},
+    {68, 55, 129},
+    {68, 57, 130},
+    {67, 58, 131},
+    {67, 59, 131},
+    {67, 60, 132},
+    {66, 61, 132},
+    {66, 62, 133},
+    {66, 64, 133},
+    {65, 65, 134},
+    {65, 66, 134},
+    {64, 67, 135},
+    {64, 68, 135},
+    {63, 69, 135},
+    {63, 71, 136},
+    {62, 72, 136},
+    {62, 73, 137},
+    {61, 74, 137},
+    {61, 75, 137},
+    {61, 76, 137},
+    {60, 77, 138},
+    {60, 78, 138},
+    {59, 80, 138},
+    {59, 81, 138},
+    {58, 82, 139},
+    {58, 83, 139},
+    {57, 84, 139},
+    {57, 85, 139},
+    {56, 86, 139},
+    {56, 87, 140},
+    {55, 88, 140},
+    {55, 89, 140},
+    {54, 90, 140},
+    {54, 91, 140},
+    {53, 92, 140},
+    {53, 93, 140},
+    {52, 94, 141},
+    {52, 95, 141},
+    {51, 96, 141},
+    {51, 97, 141},
+    {50, 98, 141},
+    {50, 99, 141},
+    {49, 100, 141},
+    {49, 101, 141},
+    {49, 102, 141},
+    {48, 103, 141},
+    {48, 104, 141},
+    {47, 105, 141},
+    {47, 106, 141},
+    {46, 107, 142},
+    {46, 108, 142},
+    {46, 109, 142},
+    {45, 110, 142},
+    {45, 111, 142},
+    {44, 112, 142},
+    {44, 113, 142},
+    {44, 114, 142},
+    {43, 115, 142},
+    {43, 116, 142},
+    {42, 117, 142},
+    {42, 118, 142},
+    {42, 119, 142},
+    {41, 120, 142},
+    {41, 121, 142},
+    {40, 122, 142},
+    {40, 122, 142},
+    {40, 123, 142},
+    {39, 124, 142},
+    {39, 125, 142},
+    {39, 126, 142},
+    {38, 127, 142},
+    {38, 128, 142},
+    {38, 129, 142},
+    {37, 130, 142},
+    {37, 131, 141},
+    {36, 132, 141},
+    {36, 133, 141},
+    {36, 134, 141},
+    {35, 135, 141},
+    {35, 136, 141},
+    {35, 137, 141},
+    {34, 137, 141},
+    {34, 138, 141},
+    {34, 139, 141},
+    {33, 140, 141},
+    {33, 141, 140},
+    {33, 142, 140},
+    {32, 143, 140},
+    {32, 144, 140},
+    {32, 145, 140},
+    {31, 146, 140},
+    {31, 147, 139},
+    {31, 148, 139},
+    {31, 149, 139},
+    {31, 150, 139},
+    {30, 151, 138},
+    {30, 152, 138},
+    {30, 153, 138},
+    {30, 153, 138},
+    {30, 154, 137},
+    {30, 155, 137},
+    {30, 156, 137},
+    {30, 157, 136},
+    {30, 158, 136},
+    {30, 159, 136},
+    {30, 160, 135},
+    {31, 161, 135},
+    {31, 162, 134},
+    {31, 163, 134},
+    {32, 164, 133},
+    {32, 165, 133},
+    {33, 166, 133},
+    {33, 167, 132},
+    {34, 167, 132},
+    {35, 168, 131},
+    {35, 169, 130},
+    {36, 170, 130},
+    {37, 171, 129},
+    {38, 172, 129},
+    {39, 173, 128},
+    {40, 174, 127},
+    {41, 175, 127},
+    {42, 176, 126},
+    {43, 177, 125},
+    {44, 177, 125},
+    {46, 178, 124},
+    {47, 179, 123},
+    {48, 180, 122},
+    {50, 181, 122},
+    {51, 182, 121},
+    {53, 183, 120},
+    {54, 184, 119},
+    {56, 185, 118},
+    {57, 185, 118},
+    {59, 186, 117},
+    {61, 187, 116},
+    {62, 188, 115},
+    {64, 189, 114},
+    {66, 190, 113},
+    {68, 190, 112},
+    {69, 191, 111},
+    {71, 192, 110},
+    {73, 193, 109},
+    {75, 194, 108},
+    {77, 194, 107},
+    {79, 195, 105},
+    {81, 196, 104},
+    {83, 197, 103},
+    {85, 198, 102},
+    {87, 198, 101},
+    {89, 199, 100},
+    {91, 200, 98},
+    {94, 201, 97},
+    {96, 201, 96},
+    {98, 202, 95},
+    {100, 203, 93},
+    {103, 204, 92},
+    {105, 204, 91},
+    {107, 205, 89},
+    {109, 206, 88},
+    {112, 206, 86},
+    {114, 207, 85},
+    {116, 208, 84},
+    {119, 208, 82},
+    {121, 209, 81},
+    {124, 210, 79},
+    {126, 210, 78},
+    {129, 211, 76},
+    {131, 211, 75},
+    {134, 212, 73},
+    {136, 213, 71},
+    {139, 213, 70},
+    {141, 214, 68},
+    {144, 214, 67},
+    {146, 215, 65},
+    {149, 215, 63},
+    {151, 216, 62},
+    {154, 216, 60},
+    {157, 217, 58},
+    {159, 217, 56},
+    {162, 218, 55},
+    {165, 218, 53},
+    {167, 219, 51},
+    {170, 219, 50},
+    {173, 220, 48},
+    {175, 220, 46},
+    {178, 221, 44},
+    {181, 221, 43},
+    {183, 221, 41},
+    {186, 222, 39},
+    {189, 222, 38},
+    {191, 223, 36},
+    {194, 223, 34},
+    {197, 223, 33},
+    {199, 224, 31},
+    {202, 224, 30},
+    {205, 224, 29},
+    {207, 225, 28},
+    {210, 225, 27},
+    {212, 225, 26},
+    {215, 226, 25},
+    {218, 226, 24},
+    {220, 226, 24},
+    {223, 227, 24},
+    {225, 227, 24},
+    {228, 227, 24},
+    {231, 228, 25},
+    {233, 228, 25},
+    {236, 228, 26},
+    {238, 229, 27},
+    {241, 229, 28},
+    {243, 229, 30},
+    {246, 230, 31},
+    {248, 230, 33},
+    {250, 230, 34},
+    {253, 231, 36},
+};
 
 void setup() {
   Serial.begin(115200);
-  delay(5000);
-  Serial.printf("\n\nstarting setup...\n");
+  delay(2000);
+  Serial.printf("\n\nHello:D, starting setup...\n");
+  Serial.print("Initial Free Heap (bytes): ");
+  Serial.println(ESP.getFreeHeap());
+
+  Serial.print("Largest Free Block (Max Alloc Heap): ");
+  Serial.println(ESP.getMaxAllocHeap());
+
   Serial.printf("dmu...\n");
   setup_dma();
   Serial.printf("ok...\n");
@@ -354,41 +430,48 @@ void setup() {
   setup_mpu();
   Serial.printf("ok...\n");
 
-   for (int j = 12; j <= 20; j++) {
-      for (int i = 28; i <= 40; i++) {
-          dens[IX(i,j)] = 100.0f;
-      }
-  }
+  Serial.printf("setup finished\n");
+  sim.reset();
+}
 
-    Serial.printf("setup finished\n");
+void mapDensityToRGB_Viridis(float density, uint8_t& r, uint8_t& g, uint8_t& b) {
+    // Normalize density to an index from 0 to 255
+    int index = (int)(density * 255.0f);
+    index = std::max(0, std::min(255, index)); // Clamp to be safe
+
+    r = viridis_colormap[index][0];
+    g = viridis_colormap[index][1];
+    b = viridis_colormap[index][2];
 }
 
 void draw_dens(){
-  const float max_expected_density = 100.f;
-  float md = dens[IX(1, 1)];
-  float sm = 0.f;
-  for (int i = 1; i <= NX; ++i) {
-			for (int j = 1 ; j <= NY; ++j) {
-        float raw_density = dens[IX(i, j)];
-        if(raw_density > md)md = raw_density;
-        sm += raw_density;
+  float max_expected_density = 100.f;
+  for(int i = 0; i < Simulation::SIZE; ++i)
+    if(sim.d[i] > max_expected_density)max_expected_density = sim.d[i];
+  
+  for (int i = 1; i <= Simulation::Nx; ++i) {
+			for (int j = 1; j <= Simulation::Ny; ++j) {
+        float dens = sim.d[Simulation::IX(i, j)];
+        uint8_t rd = 0;
+        uint8_t gr = 0;
+        uint8_t bl = 0;
 
-        float norm_density = raw_density / max_expected_density;
+        float norm_density = dens / max_expected_density;
         if (norm_density > 1.0f) norm_density = 1.0f;
         if (norm_density < 0.0f) norm_density = 0.0f;
 
-        uint8_t gray = (uint8_t)(norm_density * 255.f);
+        mapDensityToRGB_Viridis(norm_density, rd, gr, bl);
 
-        dma_display->drawPixel(i - 1, j - 1, disp_color(gray, gray, gray));
+        //uint8_t gray = (uint8_t)(norm_density * 255.f);
+        
+        if(norm_density < 0.01f)
+          dma_display->drawPixel(i - 1, j - 1, disp_color(0, 0, 0));
+        else{
+          dma_display->drawPixel(i - 1, j - 1, disp_color(rd, gr, bl));
+        }
 			}
 		}
-
-  float avg = sm / (64.f * 32.f);
-  Serial.println(avg);
-  Serial.println(md);
-  Serial.println("----------");
 }
-
 
 void loop() {
   static unsigned long end = millis();
@@ -397,8 +480,24 @@ void loop() {
 
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
+  sim.clear_buffer();
 
-  //static const float grav = 0.1f;
+  if (Serial.available() > 0) {
+    String data = Serial.readStringUntil('\n');
+    int mx = 0;
+    int my = 0;
+    int itemsParsed = sscanf(data.c_str(), "%d %d", &mx, &my);
+    if(mx >= 0 and mx < DISP_RES_X and my >= 0 and my < DISP_RES_Y){
+      sim.d0[Simulation::IX(mx + 1, my + 1)] += 100.f;
+
+      //dma_display->drawPixel(mx, my, disp_color(255, 0, 0));
+    }
+
+    if(mx == -1){
+      sim.reset();
+      dma_display->fillScreen(disp_color(255, 0, 255));
+    }
+  }
 
   float acc_x = -a.acceleration.z;
   float acc_y = a.acceleration.y;
@@ -406,18 +505,26 @@ void loop() {
   acc_x /= acc_length;
   acc_y /= acc_length;
 
-  //acc_x = 0.0f;
-  //acc_y = 1.0f;
+  for (int i = 1; i <= Simulation::Nx; ++i)
+	  for (int j = 1; j <= Simulation::Ny; ++j)
+		  if (sim.d[Simulation::IX(i, j)] > 0.01f)
+      {
 
-  for (int i=0 ; i < SIZE; ++i){
-    u_prev[i] = grav_strength * acc_x;
-    v_prev[i] = grav_strength * acc_y;
-    dens_prev[i] = 0.f;
-  }
+        sim.vy0[Simulation::IX(i, j)] += acc_y * 10.f;
+        sim.vx0[Simulation::IX(i, j)] += acc_x * 10.f;
+      }
+         
 
-  vel_step (u, v, u_prev, v_prev, visc, dt);
-	dens_step(dens, dens_prev, u, v, diff, dt);
-	draw_dens();
+
+  sim.add_source();
+  sim.vort_confinement();
+  sim.vel_step();
+  sim.den_step();
+
+
+  // //dma_display->clearScreen();
+  draw_dens();
+
   vTaskDelay(1);
 
   beg = end;
